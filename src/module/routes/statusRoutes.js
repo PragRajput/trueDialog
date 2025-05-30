@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { sendProgress } = require('../utils/sendProgress');
+const { sendProgress } = require('../../utils/sendProgress');
 
 router.get('/', (req, res) => {
   res.send('✅ Azure Event Hub Test Server is running.');
