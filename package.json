@@ -1,12 +1,12 @@
 {
   "name": "event-hub",
   "version": "1.0.0",
-  "main": "server.js",
+  "main": "server.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/config/server.js",
-    "dev": "nodemon src/config/server.js"
-    },
+    "start": "tsc && node dist/config/server.js",
+"dev": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/config/server.ts"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -15,6 +15,11 @@
     "@azure/event-hubs": "^6.0.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.29"
   }
 }

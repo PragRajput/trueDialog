@@ -1,36 +1,47 @@
-const { EventHubProducerClient } = require('@azure/event-hubs');
-const { sendProgress } = require('../../utils/sendProgress');
-const connectionString = process.env.EVENT_HUB_CONNECTION_STRING;
-const eventHubName = process.env.EVENT_HUB_NAME;
+import { Request, Response } from 'express';
+import { EventHubProducerClient } from '@azure/event-hubs';
+import { sendProgress } from '../../utils/sendProgress';
 
+const connectionString = process.env.EVENT_HUB_CONNECTION_STRING || '';
+const eventHubName = process.env.EVENT_HUB_NAME || '';
 
-class smsController {
+if (!connectionString || !eventHubName) {
+  throw new Error('Missing EVENT_HUB_CONNECTION_STRING or EVENT_HUB_NAME in environment variables.');
+}
 
-  static async sendSingle(req, res) {
+class SmsController {
+
+  static async sendSingle(req: Request, res: Response): Promise<void> {
     const message = req.body;
-    if (!message) return res.status(400).send({ error: 'Missing JSON body in request' });
+    if (!message) {
+      res.status(400).send({ error: 'Missing JSON body in request' });
+      return;
+    }
 
     try {
       const producer = new EventHubProducerClient(connectionString, eventHubName);
       const batch = await producer.createBatch();
+
       if (!batch.tryAdd({ body: message })) {
-        return res.status(400).send({ error: 'Message too large to fit in batch' });
+        res.status(400).send({ error: 'Message too large to fit in batch' });
+        return;
       }
 
       await producer.sendBatch(batch);
       await producer.close();
+
       console.log('Message sent:', message);
       res.status(200).send({ status: 'Message sent successfully' });
     } catch (err) {
       console.error('Error sending message:', err);
       res.status(500).send({ error: 'Failed to send message' });
     }
-  };
+  }
 
-  static async sendBulk(req, res) {
-    const TOTAL_MESSAGES = parseInt(req.query.count) || 100_000;
-    const MESSAGES_PER_BATCH = 500;
+  static async sendBulk(req: Request, res: Response): Promise<void> {
+    const TOTAL_MESSAGES = parseInt(req.query.count as string) || 100_000;
     const PARALLEL_BATCHES = 50;
+    const MESSAGES_PER_BATCH = 500;
 
     const producer = new EventHubProducerClient(connectionString, eventHubName);
     let currentId = 1;
@@ -44,10 +55,8 @@ class smsController {
     console.time('🔁 Bulk Send Time');
 
     try {
-      async function sendBatch(startId, count) {
-        let batch = await producer.createBatch({
-          partitionKey: `user-${startId % 6}`,
-        });
+      async function sendDynamicBatch(startId: number, count: number): Promise<void> {
+        let batch = await producer.createBatch();
 
         for (let i = 0; i < count; i++) {
           const id = startId + i;
@@ -61,7 +70,10 @@ class smsController {
             partitionKey: `user-${id % 6}`,
           };
 
+          console.log("✅ Events in batch 1:", batch.count);
+
           if (!batch.tryAdd(event)) {
+            console.log("✅ Events in batch 2:", batch.count);
             await producer.sendBatch(batch);
             batch = await producer.createBatch({ partitionKey: event.partitionKey });
             batch.tryAdd(event);
@@ -71,16 +83,21 @@ class smsController {
           sendProgress.lastUpdated = new Date().toISOString();
         }
 
-        if (batch.count > 0) await producer.sendBatch(batch);
+        if (batch.count > 0) {
+          await producer.sendBatch(batch);
+        }
       }
 
       while (currentId <= TOTAL_MESSAGES) {
-        const tasks = [];
+        const tasks: Promise<void>[] = [];
+
         for (let i = 0; i < PARALLEL_BATCHES && currentId <= TOTAL_MESSAGES; i++) {
-          const count = Math.min(MESSAGES_PER_BATCH, TOTAL_MESSAGES - currentId + 1);
-          tasks.push(sendBatch(currentId, count));
-          currentId += count;
+          const remaining = TOTAL_MESSAGES - currentId + 1;
+          const messagesInThisChunk = Math.min(MESSAGES_PER_BATCH, remaining);
+          tasks.push(sendDynamicBatch(currentId, messagesInThisChunk));
+          currentId += messagesInThisChunk;
         }
+
         await Promise.all(tasks);
       }
 
@@ -90,7 +107,7 @@ class smsController {
       sendProgress.isRunning = false;
       sendProgress.endTime = new Date().toISOString();
       sendProgress.durationSeconds =
-        (new Date(sendProgress.endTime) - new Date(sendProgress.startTime)) / 1000;
+        (new Date(sendProgress.endTime).getTime() - new Date(sendProgress.startTime).getTime()) / 1000;
 
       res.status(200).send({
         status: '✅ Bulk message send completed',
@@ -102,7 +119,7 @@ class smsController {
       sendProgress.isRunning = false;
       res.status(500).send({ error: 'Failed to send bulk messages' });
     }
-  };
+  }
 }
 
-module.exports = smsController;
+export default SmsController;
